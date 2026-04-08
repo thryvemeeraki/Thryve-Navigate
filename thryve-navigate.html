@@ -1176,7 +1176,7 @@ select.field-input{cursor:pointer}
 // ═══════════════════════════════════════
 //  GOOGLE SHEETS BACKEND — REPLACE WITH YOUR URL
 // ═══════════════════════════════════════
-var SHEET_URL = "https://script.google.com/macros/library/d/1aLcytJuDQk2HjR_mAK4pvtKxbnGm6x__rO_1qLzejOn9j79FAAuaN4Ko/2";
+var SHEET_URL = "https://script.google.com/macros/s/AKfycbxS1c-rhEstswbG4b0F6705nR6HvS_99jkTrKFLLSreomj4wFx9MpBve6Jr4SrLT7TF/exec";
 // ↑ Replace with your deployed Apps Script URL
 
 function sheetRequest(params) {
@@ -1451,57 +1451,42 @@ function verifyOTP() {
   var btn     = document.getElementById('btn-otp');
   var overlay = document.getElementById('checking-overlay');
   var val     = input.value.trim();
- 
+
   if (val.length !== 6) {
     errEl.textContent = 'Please enter the full 6-digit OTP.';
-    errEl.classList.add('show');
-    input.classList.add('error');
-    setTimeout(function() { input.classList.remove('error'); }, 500);
-    return;
+    errEl.classList.add('show'); input.classList.add('error');
+    setTimeout(function() { input.classList.remove('error'); }, 500); return;
   }
- 
-  overlay.classList.add('show');
-  btn.disabled = true;
-  errEl.classList.remove('show');
- 
-  // Step 1: Check if OTP is valid
+
+  overlay.classList.add('show'); btn.disabled = true; errEl.classList.remove('show');
+
+  // Step 1: Check OTP validity
   sheetCheck(val).then(function(res) {
     if (res && res.valid) {
-      // Step 2: Mark OTP as USED immediately (blocks reuse)
+      // Step 2: Mark OTP as USED immediately — blocks any future reuse
       return sheetRequest({ action: 'use', otp: val, name: '' }).then(function(useRes) {
-        overlay.classList.remove('show');
-        btn.disabled = false;
- 
+        overlay.classList.remove('show'); btn.disabled = false;
         if (useRes && useRes.reason === 'already_used') {
-          // Someone else (or a second tab) beat us to it
+          // Race condition: another tab beat us to it
           input.classList.add('error');
-          errEl.textContent = 'This OTP was just used. Please contact your counsellor for a new one.';
-          errEl.classList.add('show');
-          input.value = '';
+          errEl.textContent = 'This OTP was just used in another session. Please contact your counsellor for a new one.';
+          errEl.classList.add('show'); input.value = '';
           setTimeout(function() { input.classList.remove('error'); }, 500);
           return;
         }
- 
-        // OTP locked in — start the assessment
-        input.classList.remove('error');
-        errEl.classList.remove('show');
+        // OTP claimed — start the assessment
+        input.classList.remove('error'); errEl.classList.remove('show');
         sessionStorage.setItem(OTP_SESSION, val);
         var endTime = Date.now() + TOTAL_SECS * 1000;
         localStorage.setItem(TIMER_KEY, endTime.toString());
         document.getElementById('otp-screen').style.display = 'none';
-        showFormWrap();
-        buildDots();
-        updateUI();
-        startTimer(TOTAL_SECS);
+        showFormWrap(); buildDots(); updateUI(); startTimer(TOTAL_SECS);
         try { document.getElementById('s-date').valueAsDate = new Date(); } catch(e) {}
         launchConfetti(window.innerWidth / 2, 300, 30);
         showToast('&#127881; Welcome! Your Navigate session has started!');
       });
- 
     } else {
-      // OTP is invalid or already used
-      overlay.classList.remove('show');
-      btn.disabled = false;
+      overlay.classList.remove('show'); btn.disabled = false;
       input.classList.add('error');
       if (res && res.reason === 'already_used') {
         errEl.textContent = 'This OTP has already been used. Please contact your counsellor for a new one.';
@@ -1510,18 +1495,15 @@ function verifyOTP() {
       } else {
         errEl.textContent = 'Incorrect OTP. Please try again or contact your counsellor.';
       }
-      errEl.classList.add('show');
-      input.value = '';
+      errEl.classList.add('show'); input.value = '';
       setTimeout(function() { input.classList.remove('error'); }, 500);
     }
- 
   }).catch(function(err) {
-    overlay.classList.remove('show');
-    btn.disabled = false;
-    errEl.textContent = getErrorMessage(err);
-    errEl.classList.add('show');
+    overlay.classList.remove('show'); btn.disabled = false;
+    errEl.textContent = getErrorMessage(err); errEl.classList.add('show');
   });
 }
+
 // ═══════════════════════════════════════
 //  TIMER
 // ═══════════════════════════════════════
@@ -1781,24 +1763,21 @@ function collectFormData() {
 // ═══════════════════════════════════════
 function doSubmit() {
   if (!validate(cur)) return;
-  var confirmed = confirm(
-    'Are you sure you want to submit your assessment?\n\nThis cannot be undone.'
-  );
+  var confirmed = confirm('Are you sure you want to submit your assessment?\n\nThis cannot be undone.');
   if (!confirmed) return;
- 
+
   var btn = document.getElementById('btn-submit');
-  btn.disabled = true;
-  btn.textContent = 'Submitting...';
- 
+  btn.disabled = true; btn.textContent = 'Submitting...';
+
   var otp      = sessionStorage.getItem(OTP_SESSION);
   var name     = document.getElementById('s-name').value.trim();
   var email    = document.getElementById('s-email').value.trim();
   var formData = collectFormData();
- 
+
   clearInterval(timerInterval);
   localStorage.removeItem(TIMER_KEY);
- 
-  // Pass name and email as top-level params AND inside formData
+
+  // Pass name + email as top-level params AND inside formData
   sheetRequest({
     action:   'submit',
     otp:      otp,
@@ -1809,24 +1788,23 @@ function doSubmit() {
     showSpecial('success');
     document.getElementById('prog-fill').style.width = '100%';
     document.getElementById('prog-label').textContent = 'Assessment Complete!';
-    document.getElementById('prog-pct').textContent   = '100%';
+    document.getElementById('prog-pct').textContent = '100%';
     document.querySelectorAll('.sec-dot').forEach(function(d) { d.className = 'sec-dot done'; });
     document.getElementById('timer-bar').style.display = 'none';
     document.getElementById('warn-banner').classList.remove('show');
     for (var i = 0; i < 6; i++) {
       (function(idx) {
-        setTimeout(function() {
-          launchConfetti(window.innerWidth * (.15 + Math.random() * .7), window.innerHeight * .15, 22);
-        }, idx * 220);
+        setTimeout(function() { launchConfetti(window.innerWidth*(.15+Math.random()*.7), window.innerHeight*.15, 22); }, idx*220);
       })(i);
     }
   }).catch(function() {
-    // Show success anyway — data was saved, email may still arrive
+    // Show success regardless — responses saved, email on its way
     showSpecial('success');
     document.getElementById('prog-fill').style.width = '100%';
     document.getElementById('timer-bar').style.display = 'none';
   });
 }
+
 // ═══════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════
