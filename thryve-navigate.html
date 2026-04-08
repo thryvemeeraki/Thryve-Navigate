@@ -1176,37 +1176,54 @@ select.field-input{cursor:pointer}
 // ═══════════════════════════════════════
 //  GOOGLE SHEETS BACKEND — REPLACE WITH YOUR URL
 // ═══════════════════════════════════════
-var SHEET_URL = "https://script.google.com/macros/s/AKfycby9LTA7YKsMPEdGbzfA1HRBpTW8yV2J1RHM9dX_AeoI7HAE1eAgWrFP5lihcMMjwz5q/exec";
+var SHEET_URL = "https://script.google.com/macros/s/AKfycbxWVJ7PhefIEiojXhYgL5dYWokbtnfZDizpJ6k0tmOqd5WX_HHW29FE_Z_1c4QBXpW7/exec";
 // ↑ Replace with your deployed Apps Script URL
 
 function sheetRequest(params) {
   return new Promise(function(resolve, reject) {
-    var cbName = 'navigateCb' + Date.now() + Math.floor(Math.random() * 99999);
-    var timer = setTimeout(function() { cleanup(); reject(new Error('timeout')); }, 15000);
-    function cleanup() {
-      clearTimeout(timer);
-      try { window[cbName] = undefined; } catch(e) {}
-      var el = document.getElementById('jsonp_' + cbName);
-      if (el && el.parentNode) el.parentNode.removeChild(el);
-    }
-    window[cbName] = function(data) { cleanup(); resolve(data); };
+    if (!navigator.onLine) { reject(new Error('offline')); return; }
     var qs = Object.keys(params).map(function(k) {
       return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
-    }).join('&') + '&callback=' + cbName;
-    var tag = document.createElement('script');
-    tag.id = 'jsonp_' + cbName;
-    tag.src = SHEET_URL + '?' + qs;
-    tag.onerror = function() { cleanup(); reject(new Error('script_blocked')); };
-    document.body.appendChild(tag);
+    }).join('&');
+    var url = SHEET_URL + '?' + qs;
+    if (typeof fetch !== 'undefined') {
+      var timer = setTimeout(function() { reject(new Error('timeout')); }, 20000);
+      fetch(url, { method: 'GET', mode: 'cors' })
+        .then(function(r) { clearTimeout(timer); return r.json(); })
+        .then(function(data) { resolve(data); })
+        .catch(function() {
+          clearTimeout(timer);
+          jsonpRequest(url, resolve, reject);
+        });
+    } else {
+      jsonpRequest(url, resolve, reject);
+    }
   });
+}
+
+function jsonpRequest(baseUrl, resolve, reject) {
+  var cbName = 'navigateCb' + Date.now() + Math.floor(Math.random() * 99999);
+  var timer = setTimeout(function() { cleanup(); reject(new Error('timeout')); }, 20000);
+  function cleanup() {
+    clearTimeout(timer);
+    try { window[cbName] = undefined; } catch(e) {}
+    var el = document.getElementById('jsonp_' + cbName);
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  window[cbName] = function(data) { cleanup(); resolve(data); };
+  var tag = document.createElement('script');
+  tag.id = 'jsonp_' + cbName;
+  tag.src = baseUrl + '&callback=' + cbName;
+  tag.onerror = function() { cleanup(); reject(new Error('script_blocked')); };
+  document.body.appendChild(tag);
 }
 
 function getErrorMessage(err) {
   var msg = (err && err.message) ? err.message : String(err);
-  if (!navigator.onLine) return 'No internet connection detected.';
-  if (msg === 'timeout') return 'Google Sheets did not respond. Check Apps Script deployment: access must be set to "Anyone".';
-  if (msg === 'script_blocked') return 'Apps Script blocked. Deploy as: Execute as Me, Who has access: Anyone.';
-  return 'Connection failed (' + msg + '). Check your Apps Script deployment.';
+  if (!navigator.onLine || msg === 'offline') return 'No internet connection detected.';
+  if (msg === 'timeout') return 'Request timed out. Please check your internet and try again.';
+  if (msg === 'script_blocked') return 'Connection blocked. Please try a different browser or disable extensions.';
+  return 'Connection failed. Please try again.';
 }
 
 function sheetAdd(otp) { return sheetRequest({ action: 'add', otp: otp }); }
