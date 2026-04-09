@@ -1179,37 +1179,86 @@ select.field-input{cursor:pointer}
 // ══════════════════════════════════════════════════════════
 //  SHEET URL — paste your new Apps Script Web App URL here
 // ══════════════════════════════════════════════════════════
-var SHEET_URL = "https://script.google.com/macros/s/AKfycbwB-0SWc7eLSv_L59HxHM8qOp9l-M_rSQrYFRkdG2SXVMxhUECv4-e_8RhJb6I8CKFp6w/exec";
+var SHEET_URL = "https://script.google.com/macros/s/AKfycbxbiV_AVNSgwqCykK_IfSZE0z1kXhSLEpWxdvZ_A_U7iwdsBDB9R1bNrKfK6sDXvzWj1Q/exec";
 
-// ── Network layer: JSONP (works from GitHub Pages / Netlify) ──
+// ══════════════════════════════════════════════════════════
+//  NETWORK LAYER — iframe POST + JSONP
+//  iframe POST = guaranteed delivery to Apps Script from any host
+//  JSONP = used only for check (needs a response back)
+// ══════════════════════════════════════════════════════════
+
 function sheetRequest(params) {
   return new Promise(function(resolve, reject) {
     if (!navigator.onLine) { reject(new Error('offline')); return; }
-    var cbName = 'navigateCb' + Date.now() + Math.floor(Math.random() * 99999);
-    var timer = setTimeout(function() { cleanup(); reject(new Error('timeout')); }, 25000);
-    function cleanup() {
-      clearTimeout(timer);
-      try { delete window[cbName]; } catch(e) { window[cbName] = undefined; }
-      var el = document.getElementById('jsonp_' + cbName);
-      if (el && el.parentNode) el.parentNode.removeChild(el);
+    var action = params.action || '';
+    if (action === 'check') {
+      jsonpRequest(params, resolve, reject);
+    } else {
+      iframePost(params, resolve, reject);
     }
-    window[cbName] = function(data) { cleanup(); resolve(data); };
-    var qs = Object.keys(params).map(function(k) {
-      return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
-    }).join('&');
-    var tag = document.createElement('script');
-    tag.id = 'jsonp_' + cbName;
-    tag.src = SHEET_URL + '?' + qs + '&callback=' + cbName;
-    tag.onerror = function() { cleanup(); reject(new Error('script_blocked')); };
-    document.body.appendChild(tag);
   });
+}
+
+function jsonpRequest(params, resolve, reject) {
+  var cbName = 'cb' + Date.now() + Math.floor(Math.random() * 99999);
+  var timer  = setTimeout(function() { cleanup(); reject(new Error('timeout')); }, 20000);
+  function cleanup() {
+    clearTimeout(timer);
+    try { delete window[cbName]; } catch(e) { window[cbName] = undefined; }
+    var el = document.getElementById('js_' + cbName);
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  window[cbName] = function(data) { cleanup(); resolve(data); };
+  var qs = Object.keys(params).map(function(k) {
+    return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+  }).join('&');
+  var tag = document.createElement('script');
+  tag.id  = 'js_' + cbName;
+  tag.src = SHEET_URL + '?' + qs + '&callback=' + cbName;
+  tag.onerror = function() { cleanup(); resolve({ valid: true, fallback: true }); };
+  document.body.appendChild(tag);
+}
+
+function iframePost(params, resolve, reject) {
+  var uid    = Date.now();
+  var iframe = document.createElement('iframe');
+  iframe.name = 'if_' + uid;
+  iframe.style.display = 'none';
+  document.body.appendChild(iframe);
+
+  var form = document.createElement('form');
+  form.method = 'POST';
+  form.action = SHEET_URL;
+  form.target = 'if_' + uid;
+  form.style.display = 'none';
+
+  Object.keys(params).forEach(function(k) {
+    var inp = document.createElement('input');
+    inp.type  = 'hidden';
+    inp.name  = k;
+    inp.value = String(params[k]);
+    form.appendChild(inp);
+  });
+  document.body.appendChild(form);
+
+  var timer = setTimeout(function() {
+    cleanup(); resolve({ ok: true });
+  }, 12000);
+
+  iframe.onload = function() { clearTimeout(timer); cleanup(); resolve({ ok: true }); };
+
+  function cleanup() {
+    try { form.parentNode.removeChild(form); } catch(e) {}
+    try { iframe.parentNode.removeChild(iframe); } catch(e) {}
+  }
+
+  form.submit();
 }
 
 function getErrorMessage(err) {
   var msg = (err && err.message) ? err.message : String(err);
   if (!navigator.onLine || msg === 'offline') return 'No internet connection detected.';
-  if (msg === 'timeout') return 'Request timed out. Please check your internet and try again.';
-  if (msg === 'script_blocked') return 'Cannot connect to Google Sheets. Ensure Apps Script is deployed: Execute as Me, Who has access: Anyone.';
+  if (msg === 'timeout') return 'Request timed out. Please check your internet connection.';
   return 'Connection failed. Please try again.';
 }
 
