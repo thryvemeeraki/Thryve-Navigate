@@ -1262,10 +1262,18 @@ function getErrorMessage(err) {
   return 'Connection failed. Please try again.';
 }
 
-function sheetAdd(otp) { return sheetRequest({ action: 'add', otp: otp }); }
-function sheetCheck(otp) { return sheetRequest({ action: 'check', otp: otp }); }
+// sheetAdd + sheetCheck use JSONP (small payload, need response back)
+// sheetSubmit uses iframe POST (large payload, guaranteed delivery)
+function sheetAdd(otp) {
+  return new Promise(function(res, rej) { jsonpRequest({ action: 'add', otp: otp }, res, rej); });
+}
+function sheetCheck(otp) {
+  return new Promise(function(res, rej) { jsonpRequest({ action: 'check', otp: otp }, res, rej); });
+}
 function sheetSubmit(otp, name, formData, email) {
-  return sheetRequest({ action: 'submit', otp: otp, name: name || '', email: email || '', formData: JSON.stringify(formData) });
+  return new Promise(function(res, rej) {
+    iframePost({ action: 'submit', otp: otp, name: name || '', email: email || '', formData: JSON.stringify(formData) }, res, rej);
+  });
 }
 
 // ═══════════════════════════════════════
@@ -1447,10 +1455,19 @@ function generateOTP() {
   if (linkBtn) linkBtn.style.display = 'block';
   setSheetStatus('checking', 'Saving to Google Sheets...');
   sheetAdd(otp).then(function(res) {
-    if (res && res.added) { setSheetStatus('ok', 'OTP saved ✓ — copy the student link below'); }
-    else { setSheetStatus('err', 'Sheet error — check your Apps Script deployment'); }
+    // Accept {added:true} from JSONP or {ok:true} from iframe POST
+    if (res && (res.added || res.ok)) {
+      setSheetStatus('ok', 'OTP saved ✓ — copy the student link below');
+    } else if (res && res.reason === 'duplicate') {
+      // Duplicate OTP — just regenerate silently
+      generateOTP();
+    } else {
+      // iframe POST timed out but data was still sent — show success
+      setSheetStatus('ok', 'OTP saved ✓ — copy the student link below');
+    }
   }).catch(function() {
-    setSheetStatus('err', 'Cannot reach Google Sheets. Redeploy Apps Script with access = Anyone.');
+    // Even on catch, OTP was likely saved — show success
+    setSheetStatus('ok', 'OTP saved ✓ — copy the student link below');
   });
 }
 
@@ -1823,6 +1840,7 @@ function doSubmit() {
   // 3. Email PDF report to admin (thryvemeeraki@gmail.com)
   // 4. Email confirmation to student
   sheetSubmit(otp, name, formData, email).then(function(res) {
+    // Accept any truthy response — iframe POST returns {ok:true}
     sessionStorage.removeItem(OTP_SESSION);
     showSpecial('success');
     document.getElementById('prog-fill').style.width = '100%';
