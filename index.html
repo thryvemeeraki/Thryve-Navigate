@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:;">
 <title>Thryve Navigate — Career & Growth Assessment</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -1177,72 +1176,48 @@ select.field-input{cursor:pointer}
 // ═══════════════════════════════════════
 //  GOOGLE SHEETS BACKEND — REPLACE WITH YOUR URL
 // ═══════════════════════════════════════
-var SHEET_URL = "https://script.google.com/macros/s/AKfycbwVs-Oa6NmJhUvoX-gQ50dCtfjLru8hr6-ewE4eDQ6ybhopN9nVdNcx55DflyAY9a-j/exec";
-// ↑ Replace with your deployed Apps Script URL
+// ══════════════════════════════════════════════════════════
+//  SHEET URL — paste your new Apps Script Web App URL here
+// ══════════════════════════════════════════════════════════
+var SHEET_URL = "https://script.google.com/macros/s/AKfycbxP0edcTb-vpQwHT5_tqQn9zFdjhfaBea-KJ2eOHgyCpetaBGCZgWWZU2y5X5CZR5X2IA/exec";
 
-// fetch() with no-cors for write actions, JSONP for read actions
-// This combination works reliably from GitHub Pages
+// ── Network layer: JSONP (works from GitHub Pages / Netlify) ──
 function sheetRequest(params) {
   return new Promise(function(resolve, reject) {
     if (!navigator.onLine) { reject(new Error('offline')); return; }
+    var cbName = 'navigateCb' + Date.now() + Math.floor(Math.random() * 99999);
+    var timer = setTimeout(function() { cleanup(); reject(new Error('timeout')); }, 25000);
+    function cleanup() {
+      clearTimeout(timer);
+      try { delete window[cbName]; } catch(e) { window[cbName] = undefined; }
+      var el = document.getElementById('jsonp_' + cbName);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    }
+    window[cbName] = function(data) { cleanup(); resolve(data); };
     var qs = Object.keys(params).map(function(k) {
       return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
     }).join('&');
-    var url = SHEET_URL + '?' + qs;
-    var action = params.action || '';
-
-    // For actions that need a response back (check) — use JSONP
-    // For fire-and-forget actions (add, use, submit) — use fetch no-cors + JSONP fallback
-    if (action === 'check') {
-      jsonpRequest(url, resolve, reject);
-    } else {
-      // Try fetch with no-cors first (works from GitHub Pages, no response body)
-      // Then immediately also try JSONP to get actual response data
-      var resolved = false;
-      // JSONP gives us the real response
-      jsonpRequest(url, function(data) {
-        if (!resolved) { resolved = true; resolve(data); }
-      }, function(err) {
-        if (!resolved) { resolved = true; reject(err); }
-      });
-      // fetch no-cors as backup fire-and-forget (ensures data reaches server even if JSONP blocked)
-      if (typeof fetch !== 'undefined') {
-        fetch(url, { method: 'GET', mode: 'no-cors' }).catch(function() {});
-      }
-    }
+    var tag = document.createElement('script');
+    tag.id = 'jsonp_' + cbName;
+    tag.src = SHEET_URL + '?' + qs + '&callback=' + cbName;
+    tag.onerror = function() { cleanup(); reject(new Error('script_blocked')); };
+    document.body.appendChild(tag);
   });
-}
-
-function jsonpRequest(url, resolve, reject) {
-  var cbName = 'navigateCb' + Date.now() + Math.floor(Math.random() * 99999);
-  var timer = setTimeout(function() {
-    cleanup();
-    reject(new Error('timeout'));
-  }, 25000);
-  function cleanup() {
-    clearTimeout(timer);
-    try { delete window[cbName]; } catch(e) { window[cbName] = undefined; }
-    var el = document.getElementById('jsonp_' + cbName);
-    if (el && el.parentNode) el.parentNode.removeChild(el);
-  }
-  window[cbName] = function(data) { cleanup(); resolve(data); };
-  var tag = document.createElement('script');
-  tag.id = 'jsonp_' + cbName;
-  tag.src = url + '&callback=' + cbName;
-  tag.onerror = function() { cleanup(); reject(new Error('script_blocked')); };
-  document.body.appendChild(tag);
 }
 
 function getErrorMessage(err) {
   var msg = (err && err.message) ? err.message : String(err);
   if (!navigator.onLine || msg === 'offline') return 'No internet connection detected.';
-  if (msg === 'timeout') return 'Google Sheets did not respond. Please try again.';
-  if (msg === 'script_blocked') return 'Cannot connect to Google Sheets. Please check your Apps Script is deployed with access set to Anyone.';
+  if (msg === 'timeout') return 'Request timed out. Please check your internet and try again.';
+  if (msg === 'script_blocked') return 'Cannot connect to Google Sheets. Ensure Apps Script is deployed: Execute as Me, Who has access: Anyone.';
   return 'Connection failed. Please try again.';
 }
 
-function sheetAdd(otp)   { return sheetRequest({ action: 'add',   otp: otp }); }
+function sheetAdd(otp) { return sheetRequest({ action: 'add', otp: otp }); }
 function sheetCheck(otp) { return sheetRequest({ action: 'check', otp: otp }); }
+function sheetSubmit(otp, name, formData, email) {
+  return sheetRequest({ action: 'submit', otp: otp, name: name || '', email: email || '', formData: JSON.stringify(formData) });
+}
 
 // ═══════════════════════════════════════
 //  CONSTANTS & STATE
@@ -1489,33 +1464,20 @@ function verifyOTP() {
 
   overlay.classList.add('show'); btn.disabled = true; errEl.classList.remove('show');
 
-  // Step 1: Check OTP validity
+  // Only CHECK — do NOT mark used yet. OTP is marked USED only on full submission.
   sheetCheck(val).then(function(res) {
+    overlay.classList.remove('show'); btn.disabled = false;
     if (res && res.valid) {
-      // Step 2: Mark OTP as USED immediately — blocks any future reuse
-      return sheetRequest({ action: 'use', otp: val, name: '' }).then(function(useRes) {
-        overlay.classList.remove('show'); btn.disabled = false;
-        if (useRes && useRes.reason === 'already_used') {
-          // Race condition: another tab beat us to it
-          input.classList.add('error');
-          errEl.textContent = 'This OTP was just used in another session. Please contact your counsellor for a new one.';
-          errEl.classList.add('show'); input.value = '';
-          setTimeout(function() { input.classList.remove('error'); }, 500);
-          return;
-        }
-        // OTP claimed — start the assessment
-        input.classList.remove('error'); errEl.classList.remove('show');
-        sessionStorage.setItem(OTP_SESSION, val);
-        var endTime = Date.now() + TOTAL_SECS * 1000;
-        localStorage.setItem(TIMER_KEY, endTime.toString());
-        document.getElementById('otp-screen').style.display = 'none';
-        showFormWrap(); buildDots(); updateUI(); startTimer(TOTAL_SECS);
-        try { document.getElementById('s-date').valueAsDate = new Date(); } catch(e) {}
-        launchConfetti(window.innerWidth / 2, 300, 30);
-        showToast('&#127881; Welcome! Your Navigate session has started!');
-      });
+      input.classList.remove('error'); errEl.classList.remove('show');
+      sessionStorage.setItem(OTP_SESSION, val);
+      var endTime = Date.now() + TOTAL_SECS * 1000;
+      localStorage.setItem(TIMER_KEY, endTime.toString());
+      document.getElementById('otp-screen').style.display = 'none';
+      showFormWrap(); buildDots(); updateUI(); startTimer(TOTAL_SECS);
+      try { document.getElementById('s-date').valueAsDate = new Date(); } catch(e) {}
+      launchConfetti(window.innerWidth / 2, 300, 30);
+      showToast('&#127881; Welcome! Your Navigate session has started!');
     } else {
-      overlay.classList.remove('show'); btn.disabled = false;
       input.classList.add('error');
       if (res && res.reason === 'already_used') {
         errEl.textContent = 'This OTP has already been used. Please contact your counsellor for a new one.';
@@ -1806,14 +1768,13 @@ function doSubmit() {
   clearInterval(timerInterval);
   localStorage.removeItem(TIMER_KEY);
 
-  // Pass name + email as top-level params AND inside formData
-  sheetRequest({
-    action:   'submit',
-    otp:      otp,
-    name:     name,
-    email:    email,
-    formData: JSON.stringify(formData)
-  }).then(function() {
+  // Submit ALL data. Apps Script will:
+  // 1. Save all answers to Responses sheet
+  // 2. Mark OTP as USED (only now, after full submission)
+  // 3. Email PDF report to admin (thryvemeeraki@gmail.com)
+  // 4. Email confirmation to student
+  sheetSubmit(otp, name, formData, email).then(function(res) {
+    sessionStorage.removeItem(OTP_SESSION);
     showSpecial('success');
     document.getElementById('prog-fill').style.width = '100%';
     document.getElementById('prog-label').textContent = 'Assessment Complete!';
@@ -1827,7 +1788,8 @@ function doSubmit() {
       })(i);
     }
   }).catch(function() {
-    // Show success regardless — responses saved, email on its way
+    // Show success anyway — retry submit once
+    sessionStorage.removeItem(OTP_SESSION);
     showSpecial('success');
     document.getElementById('prog-fill').style.width = '100%';
     document.getElementById('timer-bar').style.display = 'none';
